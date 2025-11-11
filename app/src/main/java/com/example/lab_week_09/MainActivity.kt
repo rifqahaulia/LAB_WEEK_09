@@ -3,12 +3,22 @@ package com.example.lab_week_09
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextField
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,14 +30,13 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
-import androidx.navigation.NavType
 import com.example.lab_week_09.ui.theme.LAB_WEEK_09Theme
 import com.example.lab_week_09.ui.theme.OnBackgroundItemText
 import com.example.lab_week_09.ui.theme.OnBackgroundTitleText
 import com.example.lab_week_09.ui.theme.PrimaryTextButton
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 
-// ✅ Main entry point
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,51 +46,52 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // 🔹 ganti root menjadi App()
                     val navController = rememberNavController()
-                    App(navController = navController)
+                    App(navController)
                 }
             }
         }
     }
 }
 
-// ✅ Data Model
+// ✅ Data class Student
 data class Student(
     var name: String
 )
 
-// ✅ Root composable - Navigation host
+// ✅ Root composable: navigation graph
 @Composable
 fun App(navController: NavHostController) {
     NavHost(
         navController = navController,
         startDestination = "home"
     ) {
-        // 🔹 Route ke Home
         composable("home") {
-            Home { listDataString ->
-                navController.navigate("resultContent/?listData=$listDataString")
+            Home { listDataJson ->
+                // kirim data JSON lewat savedStateHandle
+                navController.currentBackStackEntry
+                    ?.savedStateHandle
+                    ?.set("listData", listDataJson)
+                navController.navigate("resultContent")
             }
         }
 
-        // 🔹 Route ke ResultContent
-        composable(
-            "resultContent/?listData={listData}",
-            arguments = listOf(navArgument("listData") {
-                type = NavType.StringType
-            })
-        ) {
-            ResultContent(it.arguments?.getString("listData").orEmpty())
+        composable("resultContent") {
+            // ambil JSON dari savedStateHandle
+            val json = navController.previousBackStackEntry
+                ?.savedStateHandle
+                ?.get<String>("listData")
+                .orEmpty()
+
+            ResultContent(json)
         }
     }
 }
 
-// ✅ Parent Composable (Home)
+
+// ✅ Composable Home
 @Composable
-fun Home(
-    navigateFromHomeToResult: (String) -> Unit
-) {
+fun Home(navigateFromHomeToResult: (String) -> Unit) {
     val listData = remember {
         mutableStateListOf(
             Student("Tanu"),
@@ -92,25 +102,35 @@ fun Home(
 
     var inputField by remember { mutableStateOf(Student("")) }
 
+    val onInputValueChange: (String) -> Unit = { newValue ->
+        inputField = Student(newValue)
+    }
+
+    val onButtonClick: () -> Unit = {
+        // ❌ Tidak bisa submit kosong
+        if (inputField.name.isNotBlank()) {
+            listData.add(Student(inputField.name))
+            inputField = Student("") // reset input
+        }
+    }
+
     HomeContent(
         listData = listData,
         inputField = inputField,
-        onInputValueChange = { input ->
-            inputField = inputField.copy(input)
-        },
-        onButtonClick = {
-            if (inputField.name.isNotBlank()) {
-                listData.add(inputField)
-                inputField = inputField.copy("")
-            }
-        },
+        onInputValueChange = onInputValueChange,
+        onButtonClick = onButtonClick,
         navigateFromHomeToResult = {
-            navigateFromHomeToResult(listData.toList().toString())
+            // ✅ Konversi list ke JSON dengan Moshi
+            val moshi = Moshi.Builder().build()
+            val type = Types.newParameterizedType(List::class.java, Student::class.java)
+            val adapter = moshi.adapter<List<Student>>(type)
+            val json = adapter.toJson(listData)
+            navigateFromHomeToResult(json)
         }
     )
 }
 
-// ✅ Child Composable (HomeContent)
+// ✅ Composable HomeContent
 @Composable
 fun HomeContent(
     listData: SnapshotStateList<Student>,
@@ -127,40 +147,25 @@ fun HomeContent(
                     .fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // 🔹 Title pakai UI Element
-                OnBackgroundTitleText(
-                    text = stringResource(id = R.string.enter_item)
-                )
+                OnBackgroundTitleText(text = stringResource(id = R.string.enter_item))
 
-                // 🔹 Input field
                 TextField(
                     value = inputField.name,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Text
-                    ),
-                    onValueChange = {
-                        onInputValueChange(it)
-                    }
+                    onValueChange = { onInputValueChange(it) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
                 )
 
-                // 🔹 Dua tombol (Add dan Navigate)
                 Row {
-                    PrimaryTextButton(
-                        text = stringResource(id = R.string.button_click)
-                    ) {
+                    PrimaryTextButton(text = stringResource(id = R.string.button_click)) {
                         onButtonClick()
                     }
-
-                    PrimaryTextButton(
-                        text = stringResource(id = R.string.button_navigate)
-                    ) {
+                    PrimaryTextButton(text = stringResource(id = R.string.button_navigate)) {
                         navigateFromHomeToResult()
                     }
                 }
             }
         }
 
-        // 🔹 List item
         items(listData) { item ->
             Column(
                 modifier = Modifier
@@ -174,25 +179,37 @@ fun HomeContent(
     }
 }
 
-// ✅ ResultContent Composable
+// ✅ ResultContent — tampilkan list hasil decode JSON
 @Composable
 fun ResultContent(listData: String) {
+    val moshi = Moshi.Builder().build()
+    val type = Types.newParameterizedType(List::class.java, Student::class.java)
+    val adapter = moshi.adapter<List<Student>>(type)
+
+    val students = remember(listData) {
+        adapter.fromJson(listData) ?: emptyList()
+    }
+
     Column(
         modifier = Modifier
-            .padding(vertical = 4.dp)
+            .padding(16.dp)
             .fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        OnBackgroundItemText(text = listData)
+        OnBackgroundTitleText(text = "Result List")
+
+        LazyColumn {
+            items(students) { student ->
+                OnBackgroundItemText(text = student.name)
+            }
+        }
     }
 }
 
-// ✅ Preview
 @Preview(showBackground = true)
 @Composable
 fun PreviewHome() {
     LAB_WEEK_09Theme {
-        val navController = rememberNavController()
-        App(navController)
+        Home {}
     }
 }
